@@ -1,0 +1,114 @@
+#
+# OpenBSD PACKET FILTER RULES
+#
+# vim:sw=2 ts=8:et sta
+#
+# Preparation
+#
+# /etc/sysctl.conf:
+# net.inet.ip.fastforwarding=1
+#
+# /etc/inetd.conf:
+# ftp-proxy stream tcp nowait root /usr/sbin/ftp-proxy ftp-proxy
+#-------------------------------------------------------------------
+# match in on $ext_if inet proto tcp from any to ($ext_if) port 8080 \
+#  rdr-to 10.1.2.151 port 22
+#
+# match out on $ext_if inet from any to any nat-to 192.0.2.16/28 source-hash
+#
+# pass out on $ext_if from 144.19.74.0/24 nat-to 204.92.77.100
+#
+# pass in on $ext_if inet from any to 192.0.2.17 rdr-to 10.1.2.120
+#--------------------------------------------------------------------
+# MACROS
+#
+# INTERFACES
+ext_if = "em0"  # WAN
+dmz_if = "em1"  # DMZ
+lan_if = "igb0" # LAN
+
+# NETWORK
+wan_net = "202.186.14"
+dmz_net = "10.10.10.0/24"
+lan_net = "192.168.0.0/16"
+
+# OPTIONS
+set optimization normal
+set block-policy return
+set state-policy if-bound
+set require-order yes
+set skip on lo0
+scrub in on $ext_if all fragment reassemble
+
+# NAT RULES
+nat on $ext_if from $dmz_net -> ($ext_if)
+nat on $ext_if from $lan_net -> ($ext_if)
+
+# ANCHOR RULES
+nat-anchor "ftp-proxy/*"
+rdr-anchor "ftp-proxy/*"
+
+#
+# RDR RULES
+#
+rdr on $dmz_if proto tcp to port ftp -> 127.0.0.1 port 8021
+rdr on $lan_if proto tcp to port ftp -> 127.0.0.1 port 8021
+
+# DMZ RULES - 202.186.14.186 -> 10.10.10.101
+rdr on $ext_if proto tcp from any to 202.186.14.186 port 22 -> 10.10.10.101 port 22
+rdr on $ext_if proto udp from any to 202.186.14.186 port 53 -> 10.10.10.101 port 53
+
+# DMZ RULES - 202.186.14.164 -> 10.10.10.102
+rdr on $ext_if proto tcp from any to 202.186.14.164 port 22 -> 10.10.10.102 port 22
+rdr on $ext_if proto udp from any to 202.186.14.164 port 53 -> 10.10.10.102 port 53
+
+# DMZ RULES - 202.186.14.172 -> 10.10.10.201
+rdr on $ext_if proto tcp from any to 202.186.14.172 port 80 -> 10.10.10.201 port 80
+rdr on $ext_if proto tcp from any to 202.186.14.172 port 3389 -> 10.10.10.201 port 3389
+
+# DMZ RULES - 202.186.14.183 -> 10.10.10.202
+rdr on $ext_if proto tcp from any to 202.186.14.183 port 80 -> 10.10.10.202 port 80
+
+# DMZ RULES - 202.186.14.173 -> 10.10.10.203
+rdr on $ext_if proto tcp from any to 202.186.14.173 port 3306 -> 10.10.10.203 port 3306
+
+# DMZ RULES - 202.186.14.163 -> 10.10.10.204
+rdr on $ext_if proto tcp from any to 202.186.14.163 port 22 -> 10.10.10.204 port 22
+rdr on $ext_if proto tcp from any to 202.186.14.163 port 110 -> 10.10.10.204 port 110
+rdr on $ext_if proto tcp from any to 202.186.14.163 port 465 -> 10.10.10.204 port 465
+rdr on $ext_if proto tcp from any to 202.186.14.163 port 7071 -> 10.10.10.204 port 7071
+
+# DMZ RULES - 202.186.14.189 -> 10.10.10.205
+rdr on $ext_if proto tcp from any to 202.186.14.189 port 22 -> 10.10.10.205 port 22
+rdr on $ext_if proto tcp from any to 202.186.14.189 port 110 -> 10.10.10.205 port 110
+rdr on $ext_if proto tcp from any to 202.186.14.189 port 465 -> 10.10.10.205 port 465
+rdr on $ext_if proto tcp from any to 202.186.14.189 port 7071 -> 10.10.10.205 port 7071
+
+# DMZ RULES - 202.186.14.166 -> 10.10.10.206
+rdr on $ext_if proto tcp from any to 202.186.14.166 port 22 -> 10.10.10.206 port 22
+rdr on $ext_if proto tcp from any to 202.186.14.166 port 80 -> 10.10.10.206 port 80
+rdr on $ext_if proto tcp from any to 202.186.14.166 port 443 -> 10.10.10.206 port 443
+
+# LAN RULES - 202.186.14.168 -> 192.168.3.111
+rdr on $ext_if proto tcp from any to 202.186.14.168 port 8088 -> 192.168.3.111 port 8088
+
+#
+# FTP PROXY RULES
+#
+anchor "ftp-proxy/*"
+
+# pfctl -sl
+#block drop log in on $ext_if all label "Block IN by default"
+#block drop log in on $ext_if from <bruteforce>
+#pass in on $ext_if inet proto tcp from any to any port 22 flags S/SA keep state \
+#  (max-src-conn 3, max-src-conn-rate 3/7, overload <bruteforce> flush global)
+pass in all label "Incoming packets"
+pass out all label "Outgoing packets"
+
+#block out on $ext_if from any to any
+
+# BIMAP RULES - Bidirectional Mappings, 1:1 NAT
+# Map 192.168.3.111 -> 202.186.14.168
+# pass on $ext_if from 192.168.3.111 to any nat-to 202.186.14.168
+# ..Experimental..
+# pass on $ext_if from 192.168.3.111 to any nat-to { 202.186.14.166, 202.186.14.167, 202.186.14.168 } source-hash
